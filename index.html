@@ -250,6 +250,45 @@
       })();
     </script>
 
+    <!-- Hide "Open tasks" screen & auto-click Go aggressively -->
+    <script>
+      (function hideOpenTasksAndAutoGo() {
+        function processRoot(root) {
+          // Find any element whose text starts with "Open tasks"
+          root.querySelectorAll("*").forEach(function(el) {
+            // Look for the Go link/button by checking all anchors and buttons
+            var t = (el.textContent || "").trim();
+            if (t === "Go" && (el.tagName === "A" || el.tagName === "BUTTON" || el.getAttribute("role"))) {
+              el.click();
+            }
+          });
+          // Recurse into nested shadow roots
+          root.querySelectorAll("*").forEach(function(el) {
+            if (el.shadowRoot) processRoot(el.shadowRoot);
+          });
+        }
+
+        function checkAndClick() {
+          var embed = document.getElementById("theEmbed");
+          if (!embed || !embed.shadowRoot) return;
+          var text = embed.shadowRoot.textContent || "";
+          if (/open\s*tasks/i.test(text)) {
+            // Hide the pega card content briefly while we click Go
+            var card = document.querySelector(".pega-card");
+            if (card) card.style.opacity = "0";
+            processRoot(embed.shadowRoot);
+            // Restore after a short delay
+            setTimeout(function() {
+              if (card) card.style.opacity = "1";
+            }, 1500);
+          }
+        }
+
+        // Run every 200ms for fast detection
+        setInterval(checkAndClick, 200);
+      })();
+    </script>
+
     <div class="pega-section">
       <div class="progress-stepper" style="display:none;">
         <h4>Application Journey</h4>
@@ -466,33 +505,37 @@
           return;
         }
 
-        // Click the "Go" button to skip the Open Tasks screen
-        function findAndClick(root) {
-          var clicked = false;
-          root.querySelectorAll("button, a, [role='button']").forEach(function(btn) {
-            if (clicked) return;
-            var t = (btn.textContent || "").trim();
-            if (/^go$/i.test(t)) {
-              btn.click();
-              clicked = true;
-            }
-          });
-          if (!clicked) {
-            root.querySelectorAll("*").forEach(function(el) {
-              if (el.shadowRoot) {
-                el.shadowRoot.querySelectorAll("button, a, [role='button']").forEach(function(btn) {
-                  if (clicked) return;
-                  var t = (btn.textContent || "").trim();
-                  if (/^go$/i.test(t)) {
-                    btn.click();
-                    clicked = true;
-                  }
-                });
+        // Use TreeWalker to find ANY text node that says "Go" and click its closest clickable ancestor
+        function clickGoInRoot(root) {
+          var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+          var node;
+          while (node = walker.nextNode()) {
+            if (node.textContent.trim() === "Go") {
+              var el = node.parentElement;
+              while (el) {
+                if (el.tagName === "BUTTON" || el.tagName === "A" || el.getAttribute("role") === "button" || el.getAttribute("role") === "link" || el.onclick || el.href) {
+                  el.click();
+                  return true;
+                }
+                el = el.parentElement;
               }
-            });
+              // If no clickable ancestor found, click the immediate parent
+              if (node.parentElement) {
+                node.parentElement.click();
+                return true;
+              }
+            }
           }
+          // Recurse into nested shadow roots
+          var allEls = root.querySelectorAll("*");
+          for (var i = 0; i < allEls.length; i++) {
+            if (allEls[i].shadowRoot) {
+              if (clickGoInRoot(allEls[i].shadowRoot)) return true;
+            }
+          }
+          return false;
         }
-        findAndClick(embed.shadowRoot);
+        clickGoInRoot(embed.shadowRoot);
       }
 
       function pollPegaStep() {
@@ -509,6 +552,10 @@
       }
 
       pollIntervalId = setInterval(pollPegaStep, 1500);
+      // Faster poll specifically for auto-clicking Go (runs every 300ms)
+      setInterval(function() {
+        if (!flowCompleted) autoClickGo();
+      }, 300);
       (function observeForStepChange() {
         var embed = document.getElementById("theEmbed");
         if (!embed) { setTimeout(observeForStepChange, 500); return; }
