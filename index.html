@@ -34,11 +34,90 @@
         align-items: flex-start;
         gap: 0;
       }
+      /* Vertical progress stepper */
+      .progress-stepper {
+        width: 220px;
+        min-width: 220px;
+        background: #fff;
+        border-radius: 4px 0 0 4px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+        padding: 32px 20px;
+        align-self: stretch;
+        border-top: 4px solid #ff5327;
+      }
+      .progress-stepper h4 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: #888;
+        margin-bottom: 24px;
+        font-weight: 600;
+      }
+      .stepper-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        position: relative;
+      }
+      .stepper-list li {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        position: relative;
+        padding-bottom: 28px;
+      }
+      .stepper-list li:last-child { padding-bottom: 0; }
+      .stepper-list li:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        left: 13px;
+        top: 28px;
+        width: 2px;
+        bottom: 0;
+        background: #ddd;
+      }
+      .stepper-list li.completed:not(:last-child)::after { background: #ff5327; }
+      .step-circle {
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        border-radius: 50%;
+        border: 2px solid #ddd;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #aaa;
+        background: #fff;
+        position: relative;
+        z-index: 1;
+        transition: all 0.3s ease;
+      }
+      .stepper-list li.completed .step-circle {
+        background: #ff5327;
+        border-color: #ff5327;
+        color: #fff;
+      }
+      .stepper-list li.active .step-circle {
+        border-color: #ff5327;
+        color: #ff5327;
+        box-shadow: 0 0 0 3px rgba(255,83,39,0.15);
+      }
+      .step-label {
+        font-size: 0.82rem;
+        color: #999;
+        padding-top: 4px;
+        line-height: 1.3;
+        transition: color 0.3s ease;
+      }
+      .stepper-list li.completed .step-label { color: #333; font-weight: 500; }
+      .stepper-list li.active .step-label { color: #ff5327; font-weight: 600; }
       .pega-card {
         max-width: 820px;
         width: 100%;
         background: #fff;
-        border-radius: 4px;
+        border-radius: 0 4px 4px 0;
         box-shadow: 0 1px 6px rgba(0,0,0,0.08);
         overflow: hidden;
       }
@@ -172,6 +251,23 @@
     </script>
 
     <div class="pega-section">
+      <div class="progress-stepper" style="display:none;">
+        <h4>Application Journey</h4>
+        <ol class="stepper-list" id="progressStepper">
+          <li class="active" data-step="1">
+            <div class="step-circle">1</div>
+            <div class="step-label">Capture Channel Details</div>
+          </li>
+          <li data-step="2">
+            <div class="step-circle">2</div>
+            <div class="step-label">Mortgage Consent</div>
+          </li>
+          <li data-step="3">
+            <div class="step-circle">3</div>
+            <div class="step-label">Upload Documents</div>
+          </li>
+        </ol>
+      </div>
       <div class="pega-card">
         <div class="pega-card-top-bar"></div>
         <pega-embed
@@ -291,28 +387,195 @@
     </script>
 
     <script>
-      function checkForSubmission() {
-        var embed = document.getElementById("theEmbed");
-        if (!embed) return;
-        var allText = (embed.shadowRoot ? embed.shadowRoot.textContent : "") + (embed.textContent || "");
-        if (/open\s*tasks/i.test(allText) || /DisplayScreeningInputs/i.test(allText)) {
-          var pegaSection = document.querySelector(".pega-section");
-          var thankYou = document.getElementById("thankYouSection");
-          if (pegaSection) pegaSection.style.display = "none";
-          if (thankYou) { thankYou.style.display = "flex"; thankYou.style.justifyContent = "center"; }
-          document.querySelectorAll("#progressStepper li").forEach(function(li) {
-            li.classList.remove("active");
+      const stepKeywords = [
+        { step: 1, patterns: ["capture channel", "channel detail", "channel"] },
+        { step: 2, patterns: ["mortgage consent", "consent"] },
+        { step: 3, patterns: ["upload document", "document upload", "upload"] },
+      ];
+
+      let lastDetectedStep = 0;
+      let flowCompleted = false;
+      let pollIntervalId = null;
+
+      function detectStepFromHeading(root) {
+        let headingText = "";
+        root.querySelectorAll("h1, h2, h3, h4").forEach(function(h) {
+          if (h.offsetParent !== null && h.textContent.trim())
+            headingText += " " + h.textContent.toLowerCase();
+        });
+        root.querySelectorAll("*").forEach(function(el) {
+          if (el.shadowRoot) {
+            el.shadowRoot.querySelectorAll("h1, h2, h3, h4").forEach(function(h) {
+              if (h.textContent.trim()) headingText += " " + h.textContent.toLowerCase();
+            });
+          }
+        });
+        for (let i = 0; i < stepKeywords.length; i++)
+          for (let j = 0; j < stepKeywords[i].patterns.length; j++)
+            if (headingText.indexOf(stepKeywords[i].patterns[j]) !== -1)
+              return stepKeywords[i].step;
+        return 0;
+      }
+
+      function updateStepper(currentStep) {
+        // Never go backwards — only advance
+        if (currentStep === 0 || currentStep <= lastDetectedStep) return;
+        // Show stepper on first match (it starts hidden)
+        var stepper = document.querySelector(".progress-stepper");
+        if (stepper && stepper.style.display === "none") stepper.style.display = "";
+        lastDetectedStep = currentStep;
+        document.querySelectorAll("#progressStepper li").forEach(function(li) {
+          var s = parseInt(li.getAttribute("data-step"), 10);
+          li.classList.remove("active", "completed");
+          if (s < currentStep) {
             li.classList.add("completed");
             li.querySelector(".step-circle").innerHTML = "&#10003;";
+          } else if (s === currentStep) {
+            li.classList.add("active");
+            li.querySelector(".step-circle").textContent = s;
+          } else {
+            li.querySelector(".step-circle").textContent = s;
+          }
+        });
+      }
+
+      function showThankYou() {
+        if (flowCompleted) return;
+        flowCompleted = true;
+        // Stop all polling
+        if (pollIntervalId) { clearInterval(pollIntervalId); pollIntervalId = null; }
+        var pegaSection = document.querySelector(".pega-section");
+        var thankYou = document.getElementById("thankYouSection");
+        if (pegaSection) pegaSection.style.display = "none";
+        if (thankYou) { thankYou.style.display = "flex"; thankYou.style.justifyContent = "center"; }
+        // Remove the stepper from the DOM entirely
+        var stepper = document.querySelector(".progress-stepper");
+        if (stepper) stepper.remove();
+      }
+
+      function autoClickGo() {
+        if (flowCompleted) return;
+        var embed = document.getElementById("theEmbed");
+        if (!embed || !embed.shadowRoot) return;
+        var bodyText = embed.shadowRoot.textContent || "";
+        if (!/open\s*tasks/i.test(bodyText)) return;
+
+        // After step 3 is done, show thank-you immediately
+        if (lastDetectedStep >= 3) {
+          showThankYou();
+          return;
+        }
+
+        // Click the "Go" button to skip the Open Tasks screen
+        function findAndClick(root) {
+          var clicked = false;
+          root.querySelectorAll("button, a, [role='button']").forEach(function(btn) {
+            if (clicked) return;
+            var t = (btn.textContent || "").trim();
+            if (/^go$/i.test(t)) {
+              btn.click();
+              clicked = true;
+            }
           });
+          if (!clicked) {
+            root.querySelectorAll("*").forEach(function(el) {
+              if (el.shadowRoot) {
+                el.shadowRoot.querySelectorAll("button, a, [role='button']").forEach(function(btn) {
+                  if (clicked) return;
+                  var t = (btn.textContent || "").trim();
+                  if (/^go$/i.test(t)) {
+                    btn.click();
+                    clicked = true;
+                  }
+                });
+              }
+            });
+          }
+        }
+        findAndClick(embed.shadowRoot);
+      }
+
+      function pollPegaStep() {
+        if (flowCompleted) return;
+        var embed = document.getElementById("theEmbed");
+        if (!embed || !embed.shadowRoot) return;
+        autoClickGo();
+        var detected = detectStepFromHeading(embed.shadowRoot);
+        updateStepper(detected);
+        // After step 3, if heading disappears show thank-you immediately (no delay)
+        if (lastDetectedStep >= 3 && detected === 0) {
+          showThankYou();
         }
       }
-      setInterval(checkForSubmission, 1500);
-      (function observeSubmission() {
+
+      pollIntervalId = setInterval(pollPegaStep, 1500);
+      (function observeForStepChange() {
         var embed = document.getElementById("theEmbed");
-        if (!embed) { setTimeout(observeSubmission, 500); return; }
-        if (!embed.shadowRoot) { setTimeout(observeSubmission, 500); return; }
-        new MutationObserver(checkForSubmission).observe(embed.shadowRoot, { childList: true, subtree: true });
+        if (!embed) { setTimeout(observeForStepChange, 500); return; }
+        if (!embed.shadowRoot) { setTimeout(observeForStepChange, 500); return; }
+        new MutationObserver(pollPegaStep).observe(embed.shadowRoot, { childList: true, subtree: true });
+      })();
+    </script>
+
+    <!-- Intercept "Advance this case" on post-flow screens -->
+    <script>
+      (function watchAdvanceButton() {
+        function getCurrentHeading() {
+          var embed = document.getElementById("theEmbed");
+          if (!embed || !embed.shadowRoot) return "";
+          var text = "";
+          embed.shadowRoot.querySelectorAll("h1, h2, h3, h4").forEach(function(h) {
+            if (h.offsetParent !== null && h.textContent.trim())
+              text += " " + h.textContent.toLowerCase();
+          });
+          embed.shadowRoot.querySelectorAll("*").forEach(function(el) {
+            if (el.shadowRoot) {
+              el.shadowRoot.querySelectorAll("h1, h2, h3, h4").forEach(function(h) {
+                if (h.textContent.trim()) text += " " + h.textContent.toLowerCase();
+              });
+            }
+          });
+          return text;
+        }
+
+        function hookAdvanceBtn(root) {
+          root.querySelectorAll("button, [role='button']").forEach(function(btn) {
+            if (btn._advHooked) return;
+            var t = (btn.textContent || "").trim().toLowerCase();
+            if (/advance\s*this\s*case/i.test(t)) {
+              btn._advHooked = true;
+              btn.addEventListener("click", function() {
+                var heading = getCurrentHeading();
+                // Show thank-you after "Select Mortgage Product" or "Handle Offer Extension"
+                if (/select\s*mortgage\s*product/i.test(heading) || /handle\s*offer\s*extension/i.test(heading)) {
+                  setTimeout(function() {
+                    var pegaSection = document.querySelector(".pega-section");
+                    var thankYou = document.getElementById("thankYouSection");
+                    if (pegaSection) pegaSection.style.display = "none";
+                    if (thankYou) { thankYou.style.display = "flex"; thankYou.style.justifyContent = "center"; }
+                  }, 500);
+                }
+              });
+            }
+          });
+          root.querySelectorAll("*").forEach(function(el) {
+            if (el.shadowRoot) hookAdvanceBtn(el.shadowRoot);
+          });
+        }
+
+        function tryHook() {
+          var embed = document.getElementById("theEmbed");
+          if (!embed || !embed.shadowRoot) return;
+          hookAdvanceBtn(embed.shadowRoot);
+        }
+
+        setInterval(tryHook, 1500);
+        (function observeForAdvance() {
+          var embed = document.getElementById("theEmbed");
+          if (!embed) { setTimeout(observeForAdvance, 500); return; }
+          if (!embed.shadowRoot) { setTimeout(observeForAdvance, 500); return; }
+          new MutationObserver(tryHook).observe(embed.shadowRoot, { childList: true, subtree: true });
+        })();
       })();
     </script>
 
